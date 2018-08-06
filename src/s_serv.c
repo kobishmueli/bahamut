@@ -37,6 +37,7 @@
 #include <time.h>
 #endif
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <fcntl.h>
 #include "h.h"
 #if defined( HAVE_STRING_H )
@@ -51,6 +52,7 @@
 #include "throttle.h"
 #include "clones.h"
 #include "memcount.h"
+#include <zlib.h>
 
 static char buf[BUFSIZE];
 extern int  rehashed;
@@ -64,6 +66,7 @@ extern char *smalldate(time_t); /* defined in s_misc.c */
 extern void outofmemory(void);  /* defined in list.c */
 extern void s_die(void);
 extern int  match(char *, char *);      /* defined in match.c */
+extern char *engine_name(); /* defined in socketengine_*.c */
 
 /* Local function prototypes */
 
@@ -399,6 +402,8 @@ m_info(aClient *cptr, aClient *sptr, int parc, char *parv[])
     char      **text = infotext;
 
     static time_t last_used = 0L;
+    struct utsname uninfo;
+
     if (hunt_server(cptr,sptr,":%s INFO :%s",1,parc,parv) == HUNTED_ISME) 
     {
         if(!IsULine(sptr) && !IsServer(sptr))
@@ -425,6 +430,31 @@ m_info(aClient *cptr, aClient *sptr, int parc, char *parv[])
             sendto_one(sptr, rpl_str(RPL_INFO),
                        me.name, parv[0], *text++);
                         
+        if(IsAdmin(sptr) || IsULine(sptr))
+        {
+            uname(&uninfo);
+            sendto_one(sptr, ":%s %d %s :OS: %s %s %s %s",
+                       me.name, RPL_INFO, parv[0], uninfo.sysname,
+                       uninfo.release, uninfo.machine, uninfo.version);
+            sendto_one(sptr, ":%s %d %s :Socket Engine Type: %s", me.name,
+                       RPL_INFO, parv[0], engine_name());
+#ifdef USE_SSL
+            sendto_one(sptr, ":%s %d %s :OpenSSL Version: %s", me.name,
+                       RPL_INFO, parv[0], SSLeay_version(SSLEAY_VERSION));
+#endif
+            sendto_one(sptr, ":%s %d %s :zlib version: %s", me.name,
+                       RPL_INFO, parv[0], ZLIB_VERSION);
+            sendto_one(sptr, ":%s %d %s :FD_SETSIZE=%d WRITEV_IOV=%d "
+                       "MAXCONNECTIONS=%d MAX_BUFFER=%d MAXCLIENTS=%d",
+                       me.name, RPL_INFO, parv[0], FD_SETSIZE,
+#ifdef WRITEV_IOV
+                       WRITEV_IOV,
+#else
+                       0,
+#endif
+                       MAXCONNECTIONS, MAX_BUFFER, MAXCLIENTS);
+        }
+
         sendto_one(sptr, rpl_str(RPL_INFO), me.name, parv[0], "");
 
         /* I am -definately- going to come up with a replacement for this! */
@@ -2044,7 +2074,7 @@ m_trace(aClient *cptr, aClient *sptr, int parc, char *parv[])
                            *(acptr->serv->bynick) ? acptr->serv->bynick : "*", 
                            *(acptr->serv->byuser) ? acptr->serv->byuser : "*", 
                            *(acptr->serv->byhost) ? acptr->serv->byhost : 
-                           me.name);
+                           me.name, timeofday - acptr->lasttime);
                 break;
             case STAT_LOG:
                 sendto_one(sptr, rpl_str(RPL_TRACELOG), me.name,
@@ -2606,6 +2636,38 @@ m_rakill(aClient *cptr, aClient *sptr, int parc, char *parv[])
     userban_free(ban);
 
     sendto_serv_butone(cptr, ":%s RAKILL %s %s", sptr->name, parv[1], parv[2]);
+    return 0;
+}
+
+/*
+ * Allow U-lined servers to remove all network-wide bans in case of an emergency -xPsycho
+ */
+
+int
+m_nbanreset(aClient *cptr, aClient *sptr, int parc, char *parv[])
+{
+    if(!IsServer(sptr))
+    {
+        return 0;
+    }
+
+    if(!IsULine(sptr))
+    {
+        sendto_serv_butone(&me, ":%s GLOBOPS :Non-ULined server %s trying to NBANRESET!",  me.name, sptr->name);
+        send_globops("From %s: Non-ULined server %s trying to NBANRESET!", me.name, sptr->name);
+        return 0;
+    }
+
+    sendto_ops("%s is removing all network bans and resetting throttles", sptr->name);
+
+    remove_userbans_match_flags(UBAN_NETWORK, 0);
+    remove_simbans_match_flags(SBAN_NICK|SBAN_NETWORK, 0);
+    remove_simbans_match_flags(SBAN_CHAN|SBAN_NETWORK, 0);
+    remove_simbans_match_flags(SBAN_GCOS|SBAN_NETWORK, 0);
+    throttle_rehash();
+
+    sendto_serv_butone(cptr, ":%s NBANRESET", sptr->name);
+
     return 0;
 }
 

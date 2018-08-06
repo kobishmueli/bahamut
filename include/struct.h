@@ -56,6 +56,7 @@
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include "libcrypto-compat.h"
 #endif
 
 #define REPORT_DO_DNS_	   ":%s NOTICE AUTH :*** Looking up your hostname..."
@@ -134,7 +135,7 @@ typedef struct SServicesTag ServicesTag;
 #define	KEYLEN		    23
 #define	BUFSIZE		    512	/* WARNING: *DONT* CHANGE THIS!!!! */
 #define	MAXRECIPIENTS       20
-#define	MAXBANS	 	    200
+#define	MAXBANS	 	    500
 #define MAXINVITELIST       100
 #define MAXEXEMPTLIST       100
 
